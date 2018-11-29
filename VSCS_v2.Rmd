@@ -1,0 +1,240 @@
+---
+title: "VSCS_v1"
+author: "YUE Yi, 06164552;"
+date: "9/26/2016"
+output: html_document
+---
+#ARMA model with VSCS method, here we test AR(10)
+**a**
+following is ARMA(2,2)
+```{r}
+model1=list(order=c(2,0,2),ar=c(0.5,-0.5),ma=c(-0.3,0.7))
+n=200
+sd=1
+sim.arma22=arima.sim(model1,n)
+plot.ts(sim.arma22)
+```
+following is AR(6)
+```{r}
+model1=list(order=c(6,0,0),ar=c(0.5,0,-0.5,0,0.1,0))
+n=200
+sd=1
+simar6=arima.sim(model1,n)
+plot.ts(simar6)
+```
+<p>
+following is AR(10)
+##question: stationary??
+```{r}
+nowcoeff=c(0.5,0,-0.5,0,0.4,0,-0.3,0,0.13,0)
+modtrue=c(0,1,0,1,0,1,0,1,0,1)#from zt-10 to zt-1
+model1=list(order=c(10,0,0),ar=nowcoeff)
+n=8000
+sd=1
+simar10=arima.sim(model1,n+1)
+plot.ts(simar10)
+```
+auto.arima, problem max.p=max.q=5
+```{r}
+library(forecast)
+testmod=auto.arima(simar10,max.p=12,max.q = 12)
+```
+initialize
+```{r}
+nn=2^10
+x0=rep(0,(n-9)) 
+x1=simar10[1:(n-9)]#zt-10
+x2=simar10[2:(n-8)]
+x3=simar10[3:(n-7)]
+x4=simar10[4:(n-6)]
+x5=simar10[5:(n-5)]
+x6=simar10[6:(n-4)]
+x7=simar10[7:(n-3)]
+x8=simar10[8:(n-2)]
+x9=simar10[9:(n-1)]
+x10=simar10[10:n]#zt-1
+xfull=cbind(x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+y=simar10[11:(n+1)]
+modlinear=lm(y~xfull)
+summary(modlinear)
+xm=cbind(x1,x2,x3,x4,x5,x6,x7,x8,x9,x10)
+round(cor(xm),digit= 2)
+```
+creat model map
+```{r}
+modelmap=matrix(NA,nn,10)
+for (i in 1:nn){
+  temp=i
+  for (j in 1:10){
+    modelmap[i,j]=temp %%2
+    temp=temp%/%2
+  }
+}
+```
+df and RSS
+```{r}
+df=matrix(NA,nn,1)
+rss=matrix(NA,nn,1)
+for (i in 1:nn){
+  temp=0
+  for (j in 1:10){
+    if (!modelmap[i,j]==0){
+      if (temp==0){
+        temp=1
+        x=xfull[,j]
+      }else{
+        x=cbind(x,xfull[,j])
+         temp=temp+1
+      }
+    }
+  }#end for j
+  modtemp=lm(y~x)
+  df[i]=modtemp$df.residual
+  rss[i]=sum(modtemp$residuals^2)
+}#end for i
+```
+
+
+<p>
+F test
+##here we change alpha from 0.001 to 0.05 with step 0.001
+```{r}
+II2map=rep(0,10)
+alphax=matrix(0,1,50)
+for (hhh in 1:50){
+
+  alpha=hhh/1000
+  alphax[hhh]=alpha
+
+library(stats)
+ok=matrix(0,(nn-1),1)
+ok[nn-1]=1
+tot=0
+#alpha=0.05
+ECSset=c()
+for (i in 1:(nn-2)){
+  temp=((rss[i]-rss[nn-1])/(df[i]-df[nn-1]))/(rss[nn-1]/df[nn-1])
+  ftest=qf(alpha, (df[i]-df[nn-1]), df[nn-1],lower.tail = FALSE, log.p = FALSE)
+  if (temp<=ftest){
+    ok[i]=1
+    tot=tot+1
+    ECSset=union(ECSset,i)
+  }
+}
+
+#look ECS model
+
+lookECS=NA
+for (i in ECSset){
+  if (is.na(lookECS)){
+    lookECS=modelmap[i,]
+  }else{
+    lookECS=rbind(lookECS,modelmap[i,])
+  }
+}
+
+#find LBM
+
+lbm=matrix(0,tot,1)
+totlbm=0
+lbmset=c()
+for (i in ECSset){
+  temp=1
+  for (j in ECSset){
+    if (!i==j){
+      num=0
+      for (k in 1:10){
+        if (modelmap[i,k]>=modelmap[j,k]){
+          num=num+1
+        }
+      if (num==10){
+        temp=0
+        break
+      }
+      }#end for k
+    }
+  }#end for j
+  if (temp==1){
+    lbm[i]==1
+    totlbm=totlbm+1
+    lbmset=union(lbmset,i)
+  }
+}#end for i
+totlbm
+lbmset
+modelmap[lbmset[1],]# this one is true model
+modelmap[lbmset[2],]
+
+#calculate LBM coefficients
+
+for (i in 1:totlbm){
+  temp=0
+  for (j in 1:10){
+    if (!modelmap[lbmset[i],j]==0){
+      if (temp==0){
+        temp=1
+        x=xfull[,j]
+      }else{
+        x=cbind(x,xfull[,j])
+         temp=temp+1
+      }
+    }
+  }#end for j
+  if (i==1){
+    modlbm1=lm(y~x)
+  }else{
+    modlbm2=lm(y~x)
+  }
+  
+}#end for i
+
+#calculate Index
+
+MEI=log(totlbm)
+II=matrix(NA,1,10)
+for (k in 1:10){
+  temp=0
+  for (i in 1:totlbm){
+    temp=temp+modelmap[lbmset[i],k]
+  }
+  II[k]=temp/totlbm
+}
+II
+
+#calculate II2
+
+II2=matrix(NA,1,10)
+for (k in 1:10){
+  temp=0
+  for (i in ECSset){
+    temp=temp+modelmap[i,k]
+  }
+  II2[k]=temp/tot
+}
+round(II2,2)
+
+II2map=rbind(II2map,II2)
+}#end for hhh
+```
+map II2
+```{r}
+par(mfrow=c(3,3))
+for (i in 1:10){
+  x=as.vector(II2map[2:51,i])
+  matplot(t(alphax),x,ylim=c(0,1),"l",add = FALSE)
+}
+```
+
+```{r}
+par(mfrow=c(1,1))
+plot(t(alphax),as.vector(II2map[2:51,1]), ylim=c(0,1),"l")
+for (i in 2:10){
+  par(new=TRUE)
+  plot(t(alphax),as.vector(II2map[2:51,i]), ylim=c(0,1),"l")
+}
+```
+
+
+
+
+
